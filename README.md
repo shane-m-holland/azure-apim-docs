@@ -40,6 +40,7 @@ Comprehensive guide to the APIM Developer Portal, including customization, secur
 - OIDC authentication and delegation
 - User management and subscriptions
 - Content management
+- Environment promotion
 
 ### [Monitoring and Observability](monitoring-and-observability/)
 Monitoring strategies, observability patterns, and integration with Application Insights and third-party tools.
@@ -104,7 +105,7 @@ For questions or issues:
 
 ## Version History
 
-This documentation reflects the Azure APIM implementation as of December 2024, including:
+This documentation reflects the Azure APIM implementation as of December 2025, including:
 - Azure APIM infrastructure deployment patterns
 - Developer Portal customization and OIDC delegation
 - Multi-repository DevOps strategies
@@ -112,6 +113,6 @@ This documentation reflects the Azure APIM implementation as of December 2024, i
 
 ---
 
-**Document Version:** 3.0
-**Last Updated:** December 2024
+**Document Version:** 1.0
+**Last Updated:** December 2025
 **Maintained By:** Implementation Team
