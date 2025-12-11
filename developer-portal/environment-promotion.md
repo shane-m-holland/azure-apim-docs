@@ -69,61 +69,327 @@ This guide provides best practices and step-by-step procedures for promoting Dev
 
 ## Promotion Methods
 
-### Method 1: Manual Content Export/Import
+### Method 1: Automated Migration Script (Recommended)
 
-Use for simple customizations made via the visual editor.
+The proper way to migrate developer portal content between API Management services is using the `scripts.v3/migrate.js` script from the [developer portal GitHub repository](https://github.com/Azure/api-management-developer-portal/blob/master/scripts.v3/migrate.js).
 
-#### Step 1: Export from Source Environment
+**Official Microsoft Documentation:** [Automate Developer Portal Deployments](https://learn.microsoft.com/en-us/azure/api-management/automate-portal-deployments)
 
-**Option A: Via Azure Portal**
-1. Navigate to APIM instance
-2. Go to Developer Portal → Portal Overview
-3. Click "Export website" button
-4. Save the exported JSON file
+#### Prerequisites
 
-**Option B: Via Azure CLI**
+1. **Node.js and npm** installed locally
+2. **Azure CLI** authenticated with appropriate permissions
+3. **Access** to both source and destination APIM instances
+4. **Backup** of destination portal (script removes existing content)
+
+#### Important Warnings
+
+⚠️ **The script removes all content from the destination portal before migration**  
+⚠️ **Migration between classic tiers (Standard) and v2 tiers (Standard v2) is NOT supported**  
+⚠️ **Migration between v2 tier instances is NOT supported**  
+⚠️ **Always backup the destination environment before running the script**
+
+#### Migration Steps
+
+**Step 1: Clone the Developer Portal Repository**
 ```bash
-# Export portal content
-az rest --method get \
-  --url "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.ApiManagement/service/{apimServiceName}/contentTypes?api-version=2021-08-01" \
-  --output-file portal-content.json
+git clone https://github.com/Azure/api-management-developer-portal.git
+cd api-management-developer-portal
 ```
 
-#### Step 2: Review and Test Export
-
-1. Review the exported content for environment-specific values
-2. Update any hardcoded URLs or references
-3. Document any manual configuration needed
-
-#### Step 3: Import to Target Environment
-
-**Via Azure Portal:**
-1. Navigate to target APIM instance
-2. Go to Developer Portal → Portal Overview
-3. Click "Import website"
-4. Upload the exported JSON file
-5. Confirm the import operation
-
-**Via Azure CLI:**
+**Step 2: Install Dependencies**
 ```bash
-# Import portal content
-az rest --method put \
-  --url "https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.ApiManagement/service/{apimServiceName}/contentTypes?api-version=2021-08-01" \
-  --body @portal-content.json
+npm install
 ```
 
-#### Step 4: Republish Portal
-
-After import, republish the portal:
-
+**Step 3: Authenticate with Azure**
 ```bash
-# Publish the developer portal
-az apim api-portal publish \
-  --resource-group {resourceGroup} \
-  --service-name {apimServiceName}
+az login
+az account set --subscription "your-subscription-id"
 ```
 
-### Method 2: REST API Automation
+**Step 4: Run Migration Script**
+
+For **managed portals** (with autopublish):
+```bash
+node ./scripts.v3/migrate.js \
+  --sourceSubscriptionId "source-subscription-id" \
+  --sourceResourceGroupName "source-rg" \
+  --sourceServiceName "source-apim-name" \
+  --destSubscriptionId "dest-subscription-id" \
+  --destResourceGroupName "dest-rg" \
+  --destServiceName "dest-apim-name" \
+  --publishDest true
+```
+
+For **self-hosted portals** (manual publish required):
+```bash
+node ./scripts.v3/migrate.js \
+  --sourceSubscriptionId "source-subscription-id" \
+  --sourceResourceGroupName "source-rg" \
+  --sourceServiceName "source-apim-name" \
+  --destSubscriptionId "dest-subscription-id" \
+  --destResourceGroupName "dest-rg" \
+  --destServiceName "dest-apim-name"
+```
+
+**Step 5: Verify Migration**
+- Navigate to destination APIM portal as administrator
+- Verify all customizations, pages, and content migrated successfully
+- For managed portals: check published site is live
+- For self-hosted portals: manually publish following [self-hosting instructions](https://learn.microsoft.com/en-us/azure/api-management/developer-portal-self-host)
+
+#### What the Script Does
+
+1. **Captures** portal content and media from source APIM service
+2. **Removes** all portal content and media from destination APIM service
+3. **Uploads** captured content and media to destination APIM service
+4. **Publishes** portal automatically (managed portals only, if `--publishDest true`)
+
+#### Special Case: Custom Storage Account
+
+If using a self-hosted portal with an explicitly defined custom storage account (i.e., `blobStorageUrl` setting in `config.design.json`), use the [original scripts.v3/migrate.js script](https://github.com/Azure/api-management-developer-portal/blob/master/scripts.v3/migrate.js). Note that the original script does not work for managed portals or self-hosted portals with storage managed by API Management.
+
+### Workaround: Standard (Classic) to V2 SKU Migration
+
+⚠️ **Important:** The automated migration script does NOT support migrating portal content from Standard (classic tier) to Standard v2 or other V2 SKU instances. This is a known limitation.
+
+If you need to promote portal content from a Standard APIM instance to a V2 APIM instance (common scenario: QA/Stage on Standard, Production on V2), use one of the following workarounds:
+
+#### Option 1: Manual Recreation (Recommended for Simple Customizations)
+
+**Best for:** Portals with basic branding, limited custom pages, and minimal customization.
+
+**Steps:**
+
+1. **Document source customizations:**
+   - Take screenshots of all custom pages
+   - Export branding assets (logos, favicon, color schemes)
+   - Document custom navigation structure
+   - Save any custom HTML/CSS/JavaScript
+
+2. **Recreate in V2 environment:**
+   - Open V2 APIM portal administrative interface
+   - Use visual editor to apply branding (logo, colors)
+   - Recreate custom pages using drag-and-drop widgets
+   - Rebuild navigation menus
+   - Add custom code if needed
+
+3. **Test and validate:**
+   - Compare with source portal using screenshots
+   - Test all functionality
+   - Verify API documentation displays correctly
+
+**Pros:** Simple, no scripting required  
+**Cons:** Time-consuming for complex portals, risk of missing customizations
+
+#### Option 2: Self-Hosted Portal Migration Bridge
+
+**Best for:** Complex customizations that are difficult to recreate manually.
+
+**Strategy:** Use a temporary Standard tier instance as a migration bridge.
+
+**Steps:**
+
+1. **Create temporary Standard tier APIM instance:**
+   ```bash
+   az apim create \
+     --name temp-migration-apim \
+     --resource-group temp-rg \
+     --location eastus \
+     --publisher-name "Your Org" \
+     --publisher-email "admin@yourorg.com" \
+     --sku-name Standard
+   ```
+
+2. **Migrate from source Standard to temporary Standard:**
+   ```bash
+   # This works because both are Standard tier
+   cd api-management-developer-portal
+   
+   node ./scripts.v3/migrate.js \
+     --sourceSubscriptionId "source-subscription-id" \
+     --sourceResourceGroupName "source-rg" \
+     --sourceServiceName "source-standard-apim" \
+     --destSubscriptionId "temp-subscription-id" \
+     --destResourceGroupName "temp-rg" \
+     --destServiceName "temp-migration-apim" \
+     --publishDest true
+   ```
+
+3. **Use self-hosted portal approach:**
+   - Clone developer portal repository
+   - Configure to connect to temporary Standard instance
+   - Generate static files
+   - Deploy static files to Azure Storage or CDN
+   - Point V2 APIM to self-hosted portal
+   - See [self-hosting documentation](https://learn.microsoft.com/en-us/azure/api-management/developer-portal-self-host)
+
+4. **Clean up temporary resources:**
+   ```bash
+   az apim delete --name temp-migration-apim --resource-group temp-rg --yes --no-wait
+   az group delete --name temp-rg --yes --no-wait
+   ```
+
+**Pros:** Preserves all customizations  
+**Cons:** Requires self-hosted portal setup, additional infrastructure, temporary costs
+
+#### Option 3: REST API Content Export/Recreation
+
+**Best for:** Teams with development resources who need automated, repeatable migrations.
+
+**Strategy:** Export content via REST API, transform if needed, recreate in V2 environment.
+
+**Steps:**
+
+1. **Export content from Standard tier:**
+   ```bash
+   # Get access token
+   ACCESS_TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+   
+   # Set variables
+   SOURCE_SUB_ID="source-subscription-id"
+   SOURCE_RG="source-rg"
+   SOURCE_APIM="source-apim-name"
+   API_VERSION="2021-08-01"
+   
+   # Export pages
+   curl -X GET \
+     "https://management.azure.com/subscriptions/${SOURCE_SUB_ID}/resourceGroups/${SOURCE_RG}/providers/Microsoft.ApiManagement/service/${SOURCE_APIM}/contentTypes/page/contentItems?api-version=${API_VERSION}" \
+     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+     > pages-export.json
+   
+   # Export other content types (document, layout, media, etc.)
+   for contentType in document layout media; do
+     curl -X GET \
+       "https://management.azure.com/subscriptions/${SOURCE_SUB_ID}/resourceGroups/${SOURCE_RG}/providers/Microsoft.ApiManagement/service/${SOURCE_APIM}/contentTypes/${contentType}/contentItems?api-version=${API_VERSION}" \
+       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+       > ${contentType}-export.json
+   done
+   ```
+
+2. **Create import script for V2:**
+   ```bash
+   # Set V2 variables
+   V2_SUB_ID="v2-subscription-id"
+   V2_RG="v2-rg"
+   V2_APIM="v2-apim-name"
+   
+   # Import pages to V2 tier
+   # Note: May require transformation for compatibility
+   for item in $(jq -r '.value[].name' pages-export.json); do
+     ITEM_DATA=$(jq ".value[] | select(.name == \"${item}\")" pages-export.json)
+     
+     echo "${ITEM_DATA}" | curl -X PUT \
+       "https://management.azure.com/subscriptions/${V2_SUB_ID}/resourceGroups/${V2_RG}/providers/Microsoft.ApiManagement/service/${V2_APIM}/contentTypes/page/contentItems/${item}?api-version=${API_VERSION}" \
+       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+       -H "Content-Type: application/json" \
+       -d @-
+   done
+   ```
+
+3. **Test and adjust:**
+   - Verify content imported correctly
+   - Fix any compatibility issues
+   - Republish portal in V2 environment
+
+**Pros:** Can be automated, repeatable, scriptable  
+**Cons:** Complex, may require content transformation, not officially supported, requires testing
+
+#### Option 4: Version Control + Infrastructure as Code Approach
+
+**Best for:** Organizations using Infrastructure as Code for portal management.
+
+**Strategy:** Store portal configuration in source control, apply to any environment.
+
+**Steps:**
+
+1. **Store customizations in source control:**
+   - Branding configuration files
+   - Custom page definitions (JSON)
+   - Custom CSS/JavaScript files
+   - ARM/Bicep templates for portal configuration
+
+2. **Use ARM/Bicep to deploy base configuration:**
+   ```bicep
+   resource apimPortalConfig 'Microsoft.ApiManagement/service/portalConfigs@2021-08-01' = {
+     name: '${apimServiceName}/default'
+     properties: {
+       enableBasicAuth: true
+       signin: {
+         require: false
+       }
+       signup: {
+         termsOfService: {
+           requireConsent: true
+         }
+       }
+       delegation: {
+         delegateRegistration: false
+         delegateSubscription: false
+       }
+     }
+   }
+   ```
+
+3. **Apply customizations via CI/CD pipeline:**
+   - Deploy to both Standard and V2 environments from same source
+   - Maintain environment parity through code
+   - Version control all changes
+
+**Pros:** Best long-term approach, environment-agnostic, version controlled, repeatable  
+**Cons:** Requires upfront investment, ongoing maintenance, learning curve
+
+#### Recommendation for Standard (QA/Stage) → V2 (Production) Scenario
+
+For environments where **QA/Stage runs on Standard** and **Production runs on V2**:
+
+**Initial Production Setup:**
+- Use **Option 1 (Manual Recreation)** for first deployment to V2 Production
+- Document the process thoroughly with screenshots and checklists
+
+**Ongoing Changes:**
+1. Make and test changes in Standard (QA/Stage) environment
+2. Document all changes with screenshots and notes
+3. Apply same changes manually to V2 (Production) using visual editor
+4. Maintain a change log to track what's been promoted
+
+**Long-term Strategy (Choose one):**
+
+**Path A: Migrate Lower Environments to V2**
+- Upgrade QA/Stage to V2 SKU when budget allows
+- Enables use of automated migration script across all environments
+- Simplifies operations and reduces manual work
+
+**Path B: Adopt Infrastructure as Code**
+- Move to **Option 4 (IaC approach)** for long-term maintainability
+- Store all portal configurations in Git
+- Deploy to both Standard and V2 from same source
+- Enables consistent, repeatable deployments
+
+**Interim Process:**
+```bash
+# Example workflow for each change
+
+# 1. Test in QA/Stage (Standard)
+# - Make changes via visual editor
+# - Test thoroughly
+# - Document with screenshots
+
+# 2. Prepare for Production (V2)
+# - Create change checklist from documentation
+# - Schedule maintenance window if needed
+# - Have rollback plan (re-create previous state)
+
+# 3. Apply to Production (V2)
+# - Open V2 APIM portal admin interface
+# - Apply changes following checklist
+# - Test each change before moving to next
+# - Publish portal
+# - Validate with smoke tests
+```
+
+### Method 2: REST API for Advanced Custom Automation
 
 Use for repeatable, automated deployments.
 
@@ -328,26 +594,29 @@ stages:
 #### 2. Execute Promotion
 
 ```bash
-# Export from QA
-az rest --method get \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${QA_RG}/providers/Microsoft.ApiManagement/service/${QA_APIM}/contentTypes?api-version=2021-08-01" \
-  --output-file qa-portal-export.json
+# Set environment variables
+export QA_SUBSCRIPTION_ID="qa-subscription-id"
+export QA_RG="qa-resource-group"
+export QA_APIM="qa-apim-name"
+export STAGE_SUBSCRIPTION_ID="stage-subscription-id"
+export STAGE_RG="stage-resource-group"
+export STAGE_APIM="stage-apim-name"
 
-# Backup Stage (before import)
-az rest --method get \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${STAGE_RG}/providers/Microsoft.ApiManagement/service/${STAGE_APIM}/contentTypes?api-version=2021-08-01" \
-  --output-file stage-portal-backup.json
+# Navigate to the developer portal repository
+cd api-management-developer-portal
 
-# Import to Stage
-az rest --method put \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${STAGE_RG}/providers/Microsoft.ApiManagement/service/${STAGE_APIM}/contentTypes?api-version=2021-08-01" \
-  --body @qa-portal-export.json
-
-# Publish Stage portal
-az apim api-portal publish \
-  --resource-group ${STAGE_RG} \
-  --service-name ${STAGE_APIM}
+# Run migration script from QA to Stage
+node ./scripts.v3/migrate.js \
+  --sourceSubscriptionId ${QA_SUBSCRIPTION_ID} \
+  --sourceResourceGroupName ${QA_RG} \
+  --sourceServiceName ${QA_APIM} \
+  --destSubscriptionId ${STAGE_SUBSCRIPTION_ID} \
+  --destResourceGroupName ${STAGE_RG} \
+  --destServiceName ${STAGE_APIM} \
+  --publishDest true
 ```
+
+**Note:** The script automatically backs up by capturing source content, removes destination content, and uploads. For additional safety, document the Stage portal state before promotion.
 
 #### 3. Post-Promotion Testing
 
@@ -379,27 +648,29 @@ az apim api-portal publish \
 #### 2. Execute Production Promotion
 
 ```bash
-# Backup Production (critical!)
-BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
-az rest --method get \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROD_RG}/providers/Microsoft.ApiManagement/service/${PROD_APIM}/contentTypes?api-version=2021-08-01" \
-  --output-file "prod-portal-backup-${BACKUP_DATE}.json"
+# Set environment variables
+export STAGE_SUBSCRIPTION_ID="stage-subscription-id"
+export STAGE_RG="stage-resource-group"
+export STAGE_APIM="stage-apim-name"
+export PROD_SUBSCRIPTION_ID="prod-subscription-id"
+export PROD_RG="prod-resource-group"
+export PROD_APIM="prod-apim-name"
 
-# Export from Stage
-az rest --method get \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${STAGE_RG}/providers/Microsoft.ApiManagement/service/${STAGE_APIM}/contentTypes?api-version=2021-08-01" \
-  --output-file stage-portal-export.json
+# Navigate to the developer portal repository
+cd api-management-developer-portal
 
-# Import to Production
-az rest --method put \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROD_RG}/providers/Microsoft.ApiManagement/service/${PROD_APIM}/contentTypes?api-version=2021-08-01" \
-  --body @stage-portal-export.json
-
-# Publish Production portal
-az apim api-portal publish \
-  --resource-group ${PROD_RG} \
-  --service-name ${PROD_APIM}
+# Run migration script from Stage to Production
+node ./scripts.v3/migrate.js \
+  --sourceSubscriptionId ${STAGE_SUBSCRIPTION_ID} \
+  --sourceResourceGroupName ${STAGE_RG} \
+  --sourceServiceName ${STAGE_APIM} \
+  --destSubscriptionId ${PROD_SUBSCRIPTION_ID} \
+  --destResourceGroupName ${PROD_RG} \
+  --destServiceName ${PROD_APIM} \
+  --publishDest true
 ```
+
+**Critical:** The script removes all destination content. Ensure you have documented the production portal state and have a tested rollback procedure before executing.
 
 #### 3. Post-Production Validation
 
@@ -492,21 +763,45 @@ curl -w "@curl-format.txt" -o /dev/null -s \
 
 ## Rollback Procedures
 
-### Quick Rollback (Using Backup)
+### Rollback Strategy
 
-If issues are detected after promotion:
+Since the migration script removes all destination content, rollback requires re-running the migration from the previous working environment.
+
+**Option 1: Roll Forward (Preferred)**
+Fix the issue in the source environment and re-run the migration script.
+
+**Option 2: Rollback to Previous Environment**
+Re-run the migration script from the last known good environment.
+
+#### Rollback Example: Revert Production to Stage
+
+If issues are detected after Stage → Production promotion:
 
 ```bash
-# Restore from backup
-az rest --method put \
-  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROD_RG}/providers/Microsoft.ApiManagement/service/${PROD_APIM}/contentTypes?api-version=2021-08-01" \
-  --body @prod-portal-backup-${BACKUP_DATE}.json
+# Set environment variables (reverse direction)
+export STAGE_SUBSCRIPTION_ID="stage-subscription-id"
+export STAGE_RG="stage-resource-group"
+export STAGE_APIM="stage-apim-name"
+export PROD_SUBSCRIPTION_ID="prod-subscription-id"
+export PROD_RG="prod-resource-group"
+export PROD_APIM="prod-apim-name"
 
-# Republish
-az apim api-portal publish \
-  --resource-group ${PROD_RG} \
-  --service-name ${PROD_APIM}
+# Navigate to the developer portal repository
+cd api-management-developer-portal
+
+# Re-run migration from Stage to Production
+# This restores Production to match Stage (the last known good state)
+node ./scripts.v3/migrate.js \
+  --sourceSubscriptionId ${STAGE_SUBSCRIPTION_ID} \
+  --sourceResourceGroupName ${STAGE_RG} \
+  --sourceServiceName ${STAGE_APIM} \
+  --destSubscriptionId ${PROD_SUBSCRIPTION_ID} \
+  --destResourceGroupName ${PROD_RG} \
+  --destServiceName ${PROD_APIM} \
+  --publishDest true
 ```
+
+**Important:** This assumes Stage still has the previous working portal content. If Stage was also affected, you may need to promote from QA.
 
 ### Rollback Decision Criteria
 
